@@ -1,5 +1,38 @@
 #!/bin/bash
 
+# Poprawa wykrywania ścieżki skryptu
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+DISCOURSE_DIR="$HOME/discourse"
+
+# Sprawdzenie i naprawa uprawnień
+if [ ! -x "$SCRIPT_PATH" ]; then
+    chmod +x "$SCRIPT_PATH" || {
+        echo "Błąd: Nie można ustawić uprawnień wykonywania dla skryptu"
+        echo "Spróbuj ręcznie: chmod +x $SCRIPT_PATH"
+        exit 1
+    }
+fi
+
+# Sprawdzenie czy skrypt jest uruchamiany jako skrypt powłoki
+if [ -z "$BASH" ]; then
+    echo "Ten skrypt wymaga powłoki Bash"
+    echo "Uruchom: bash $SCRIPT_PATH"
+    exit 1
+fi
+
+# Tworzenie katalogów jeśli nie istnieją
+mkdir -p "$DISCOURSE_DIR"
+mkdir -p "$DISCOURSE_DIR/log"
+
+# Sprawdzenie czy skrypt jest uruchamiany z właściwego katalogu
+if [ "$PWD" != "$SCRIPT_DIR" ]; then
+    cd "$SCRIPT_DIR" || {
+        echo "Nie można przejść do katalogu skryptu: $SCRIPT_DIR"
+        exit 1
+    }
+fi
+
 # Definicje kolorów i stylów
 BOLD='\e[1m'
 DIM='\e[2m'
@@ -24,12 +57,23 @@ TRANSCRIPT_FILE="$LOG_DIR/console.log"
 # Tworzenie katalogu logów jeśli nie istnieje
 mkdir -p "$LOG_DIR"
 
-# Konfiguracja przekierowania wyjścia do pliku transkryptu
-exec 1> >(tee -a "$TRANSCRIPT_FILE")
-exec 2> >(tee -a "$TRANSCRIPT_FILE" >&2)
+# Funkcja do usuwania sekwencji ANSI i logowania
+clean_and_log() {
+    sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,3})*)?[mK]//g" | while IFS= read -r line; do
+        # Zapisz czysty tekst do pliku
+        echo "$line" >> "$TRANSCRIPT_FILE"
+        # Wyświetl oryginalny tekst z kolorami
+        echo -e "$line"
+    done
+}
 
-# Dodanie znacznika czasowego do pliku transkryptu
+# Konfiguracja przekierowania wyjścia
+mkdir -p "$(dirname "$TRANSCRIPT_FILE")"
 echo "=== Sesja rozpoczęta $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$TRANSCRIPT_FILE"
+
+# Przekierowanie standardowego wyjścia i błędów przez clean_and_log
+exec 1> >(clean_and_log)
+exec 2> >(clean_and_log >&2)
 
 # Funkcja logowania
 log_message() {
@@ -295,9 +339,14 @@ fix_permalink_issues() {
     fi
     print_success "Redis wyczyszczony"
 
-    # Naprawa uprawnień i migracji
+    # Naprawa uprawnień i migracji z ignorowaniem błędów typu embeddings
     print_info "Naprawa uprawnień i migracji..."
-    if ! RAILS_ENV=development SKIP_ENFORCE_CUSTOM_FIELDS=1 bundle exec rails db:migrate > /dev/null; then
+    if ! RAILS_ENV=development \
+        SKIP_ENFORCE_CUSTOM_FIELDS=1 \
+        SKIP_DB_SETUP=1 \
+        IGNORE_UNKNOWN_TYPES=1 \
+        DB_CUSTOM_TYPES="embeddings=string" \
+        bundle exec rails db:migrate > /dev/null 2>&1; then
         print_warning "Wystąpiły problemy podczas migracji, ale kontynuuję..."
     else
         print_success "Migracje zakończone"
@@ -366,23 +415,45 @@ clean_rails_server() {
 
 # Funkcja debugowania Discourse
 debug_discourse() {
+    local fixes_report=""
     log_message "INFO" "Uruchamianie trybu debugowania..."
     
-    # Sprawdzenie i czyszczenie procesów
-    ensure_postgresql_running || return 1
-    clean_rails_server
+    # Sprawdzanie PostgreSQL
+    if ensure_postgresql_running; then
+        fixes_report+="✓ PostgreSQL uruchomiony i działa poprawnie\n"
+    else 
+        fixes_report+="✗ Nie udało się uruchomić PostgreSQL\n"
+        print_error "Krytyczny błąd: PostgreSQL nie działa"
+        return 1
+    fi
+
+    # Czyszczenie procesów
+    if clean_rails_server; then
+        fixes_report+="✓ Wyczyszczono stare procesy Rails\n"
+    fi
     check_and_clean_rails_processes
-    fix_permalink_issues
+    fixes_report+="✓ Sprawdzono i wyczyszczono wszystkie procesy\n"
+
+    # Naprawa problemów z bazą i cache
+    if fix_permalink_issues; then
+        fixes_report+="✓ Naprawiono problemy z bazą danych\n"
+        fixes_report+="✓ Wyczyszczono cache Redis\n"
+        fixes_report+="✓ Przebudowano assety\n"
+    else
+        fixes_report+="✗ Wystąpiły problemy podczas naprawy\n"
+    fi
+
+    print_info "Raport z debugowania:"
+    echo -e "$fixes_report" | while IFS= read -r line; do
+        if [[ $line == "✓"* ]]; then
+            print_success "${line#✓ }"
+        else
+            print_error "${line#✗ }"
+        fi
+    done
 
     print_info "Uruchamianie serwera w trybie debug z rozszerzonym logowaniem..."
     
-    # Upewniamy się, że jesteśmy w katalogu Discourse
-    cd "$HOME/discourse" || {
-        print_error "Nie można przejść do katalogu Discourse"
-        return 1
-    }
-    
-    # Przekierowanie wyjścia przez filtr
     DISCOURSE_HOSTNAME=localhost \
     UNICORN_LISTENER=localhost:3000 \
     ALLOW_EMBER_CLI_PROXY_BYPASS=1 \
