@@ -125,11 +125,11 @@ check_rails_logs() {
 
 toggle_debug() {
     if [ "$DEBUG_MODE" = true ]; then
-        DEBUG_MODE=false
+        export DEBUG_MODE=false
         print_info "Tryb debugowania wyłączony"
         log_message "INFO" "Tryb debugowania wyłączony"
     else
-        DEBUG_MODE=true
+        export DEBUG_MODE=true
         print_info "Tryb debugowania włączony"
         log_message "INFO" "Tryb debugowania włączony"
     fi

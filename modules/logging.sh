@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Ustawienia debugowania i logowania
-DEBUG_MODE=false
+export DEBUG_MODE=false
 LOG_DIR="$HOME/discourse/log"
 LOG_FILE="$LOG_DIR/script.log"
 TRANSCRIPT_FILE="$LOG_DIR/console.log"

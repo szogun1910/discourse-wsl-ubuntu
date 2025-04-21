@@ -101,7 +101,10 @@ while true; do
                     4) execute_with_logging "cd '$HOME/discourse' && yarn lint:js" "Uruchomienie ESLint" ;;
                     5) execute_with_logging "cd '$HOME/discourse' && yarn run ember server" "Uruchomienie serwera Ember" ;;
                     6)
-                        log_message "INFO" "Instalacja pg_vector dla PostgreSQL"
+                        # Instalacja pg_vector
+                        if [ "$DEBUG_MODE" = true ]; then
+                            print_info "DEBUG: Rozpoczynam instalację pg_vector..."
+                        fi
                         if ! command -v psql &> /dev/null; then
                             print_error "PostgreSQL nie jest zainstalowany!"
                             read -rp "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})"
@@ -114,9 +117,16 @@ while true; do
                         execute_with_logging "sudo -u postgres psql -d discourse_test -c 'CREATE EXTENSION IF NOT EXISTS vector;'" "Aktywacja rozszerzenia w bazie test"
                         rm -rf "$TEMP_DIR"
                         print_success "pg_vector został zainstalowany pomyślnie."
+                        if [ "$DEBUG_MODE" = true ]; then
+                            print_info "DEBUG: Instalacja pg_vector zakończona"
+                        fi
                         read -rp "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})"
                         ;;
-                    7) toggle_debug; read -rp "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})" ;;
+                    7) 
+                        toggle_debug
+                        show_dev_tools_menu  # Odświeżenie menu z nowym stanem DEBUG_MODE
+                        read -rp "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})" 
+                        ;;
                     8) 
                         if [ -f "$LOG_FILE" ]; then
                             less "$LOG_FILE"
