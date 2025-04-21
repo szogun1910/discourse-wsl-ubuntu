@@ -1,48 +1,87 @@
 #!/bin/bash
 
-# Poprawa wykrywania ścieżki skryptu
+###############################################################################
+# Wymaga załadowania modułów z katalogu ./modules/
+# modules/colors.sh     # moduł kolorów (wymagany przez wszystkie inne)
+# modules/config.sh     # moduł konfiguracji (wymagany przez system.sh)
+# modules/debug.sh      # moduł debugowania (wymagany przez system.sh)
+# modules/discourse.sh  # moduł zarządzania Discourse
+# modules/logging.sh    # moduł logowania
+# modules/server.sh     # moduł zarządzania serwerem
+# modules/system.sh     # moduł systemowy (wymagany przez wszystkie inne)
+# modules/display.sh    # moduł wyświetlania (wymagany przez menu)
+###############################################################################
+
+# Ścieżki
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
-DISCOURSE_DIR="$HOME/discourse"
+MODULE_DIR="$SCRIPT_DIR/modules"
+LOGS_DIR="$SCRIPT_DIR/logs"
 
-# Importowanie modułów
-source "$SCRIPT_DIR/modules/colors.sh"
-source "$SCRIPT_DIR/modules/logging.sh"
-source "$SCRIPT_DIR/modules/display.sh"
-source "$SCRIPT_DIR/modules/system.sh"
-source "$SCRIPT_DIR/modules/discourse.sh"
-source "$SCRIPT_DIR/modules/server.sh"
-source "$SCRIPT_DIR/modules/debug.sh"
+# Inicjalizacja katalogów
+mkdir -p "$LOGS_DIR"
+chmod 755 "$LOGS_DIR"
 
-# Sprawdzenie i naprawa uprawnień
-if [ ! -x "$SCRIPT_PATH" ]; then
-    chmod +x "$SCRIPT_PATH" || {
-        echo "Błąd: Nie można ustawić uprawnień wykonywania dla skryptu"
-        echo "Spróbuj ręcznie: chmod +x $SCRIPT_PATH"
+# Export ścieżek logów
+export SCRIPT_LOG_DIR="$LOGS_DIR"
+export LOG_FILE="$LOGS_DIR/script.log"
+export DEBUG_LOG="$LOGS_DIR/debug.log"
+export TRACE_LOG="$LOGS_DIR/trace.log"
+export PERFORMANCE_LOG="$LOGS_DIR/performance.log"
+export TRANSCRIPT_FILE="$LOGS_DIR/console.log"
+
+# Inicjalizacja plików logów
+for log_file in "$LOG_FILE" "$DEBUG_LOG" "$TRACE_LOG" "$PERFORMANCE_LOG" "$TRANSCRIPT_FILE"; do
+    touch "$log_file"
+    chmod 644 "$log_file"
+done
+
+# Włączamy debugowanie powłoki
+set -x
+
+# Ładowanie modułów w prawidłowej kolejności
+CORE_MODULES=(
+    "colors.sh"    # Podstawowe kolory
+    "logging.sh"   # Podstawowe logowanie
+    "display.sh"   # Interfejs użytkownika
+)
+
+SYSTEM_MODULES=(
+    "config.sh"    # Konfiguracja systemu
+    "system.sh"    # Funkcje systemowe
+    "server.sh"    # Zarządzanie serwerem
+    "debug.sh"     # Debugowanie
+    "discourse.sh" # Zarządzanie Discourse
+)
+
+# Ładowanie modułów podstawowych
+for module in "${CORE_MODULES[@]}"; do
+    if ! source "$MODULE_DIR/$module" 2>/dev/null; then
+        echo "ERROR: Nie można załadować podstawowego modułu $module"
         exit 1
-    }
-fi
+    fi
+done
 
-# Sprawdzenie czy skrypt jest uruchamiany jako skrypt powłoki
-if [ -z "$BASH" ]; then
-    echo "Ten skrypt wymaga powłoki Bash"
-    echo "Uruchom: bash $SCRIPT_PATH"
+# Ładowanie modułów systemowych
+for module in "${SYSTEM_MODULES[@]}"; do
+    if ! source "$MODULE_DIR/$module" 2>/dev/null; then
+        echo "ERROR: Nie można załadować modułu systemowego $module"
+        exit 1
+    fi
+done
+
+# Wyłączamy debugowanie powłoki
+set +x
+
+# Inicjalizacja logowania
+if type init_logging &>/dev/null; then
+    init_logging
+else
+    echo "ERROR: Funkcja init_logging nie jest dostępna"
     exit 1
 fi
 
-# Tworzenie katalogów jeśli nie istnieją
-mkdir -p "$DISCOURSE_DIR"
-mkdir -p "$DISCOURSE_DIR/log"
-
-# Sprawdzenie czy skrypt jest uruchamiany z właściwego katalogu
-if [ "$PWD" != "$SCRIPT_DIR" ]; then
-    cd "$SCRIPT_DIR" || {
-        echo "Nie można przejść do katalogu skryptu: $SCRIPT_DIR"
-        exit 1
-    }
-fi
-
-# Główna pętla menu
+# Główne menu
 while true; do
     clear
     print_header "Panel zarządzania Discourse"
@@ -52,7 +91,7 @@ while true; do
     print_option "3" "Narzędzia developerskie"
     print_option "0" "Wyjście"
     print_separator
-    
+
     echo -ne "${GREEN}Wybierz opcję:${RESET} "
     read choice
 
@@ -63,13 +102,30 @@ while true; do
                 show_discourse_menu
                 read -p "Wybierz opcję: " subchoice
                 case $subchoice in
-                    1) install_discourse; read -p "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})" ;;
-                    2) update_discourse; read -p "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})" ;;
-                    3) remove_discourse; read -p "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})" ;;
-                    4) install_plugin; read -p "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})" ;;
-                    0) break ;;
-                    *) print_error "Nieprawidłowa opcja!"; read -p "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})" ;;
+                    1) 
+                        log_message "INFO" "Rozpoczęcie instalacji Discourse"
+                        install_discourse
+                        ;;
+                    2)
+                        log_message "INFO" "Rozpoczęcie aktualizacji Discourse"
+                        update_discourse
+                        ;;
+                    3)
+                        log_message "INFO" "Rozpoczęcie usuwania Discourse"
+                        remove_discourse
+                        ;;
+                    4)
+                        log_message "INFO" "Rozpoczęcie instalacji pluginu"
+                        install_plugin
+                        ;;
+                    0)
+                        break
+                        ;;
+                    *)
+                        print_error "Nieprawidłowa opcja!"
+                        ;;
                 esac
+                read -rp "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})"
             done
             ;;
         2)
@@ -78,13 +134,30 @@ while true; do
                 show_server_menu
                 read -p "Wybierz opcję: " subchoice
                 case $subchoice in
-                    1) clean_ports 3000 4200 9292 1080; read -p "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})" ;;
-                    2) start_discourse; read -p "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})" ;;
-                    3) debug_discourse; read -p "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})" ;;
-                    4) stop_discourse; read -p "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})" ;;
-                    0) break ;;
-                    *) print_error "Nieprawidłowa opcja!"; read -p "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})" ;;
+                    1)
+                        log_message "INFO" "Czyszczenie portów"
+                        clean_ports "${DISCOURSE_PORTS[@]}"
+                        ;;
+                    2)
+                        log_message "INFO" "Uruchamianie Discourse"
+                        start_discourse
+                        ;;
+                    3)
+                        log_message "INFO" "Uruchamianie w trybie debug"
+                        start_debug_discourse
+                        ;;
+                    4)
+                        log_message "INFO" "Zatrzymywanie Discourse"
+                        stop_discourse
+                        ;;
+                    0)
+                        break
+                        ;;
+                    *)
+                        print_error "Nieprawidłowa opcja!"
+                        ;;
                 esac
+                read -rp "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})"
             done
             ;;
         3)
@@ -95,49 +168,42 @@ while true; do
                 read subchoice
 
                 case $subchoice in
-                    1) execute_with_logging "cd '$HOME/discourse' && RAILS_ENV=development bundle exec rails server" "Uruchomienie serwera Rails" ;;
-                    2) execute_with_logging "cd '$HOME/discourse' && RAILS_ENV=development bundle exec rails console" "Uruchomienie konsoli Rails" ;;
-                    3) execute_with_logging "cd '$HOME/discourse' && RAILS_ENV=test bundle exec rspec" "Uruchomienie testów RSpec" ;;
-                    4) execute_with_logging "cd '$HOME/discourse' && yarn lint:js" "Uruchomienie ESLint" ;;
-                    5) execute_with_logging "cd '$HOME/discourse' && yarn run ember server" "Uruchomienie serwera Ember" ;;
+                     1)
+                        execute_with_logging "cd '$HOME/discourse' && RAILS_ENV=development bundle exec rails server" "Uruchomienie serwera Rails"
+                        ;;
+                    2)
+                        execute_with_logging "cd '$HOME/discourse' && RAILS_ENV=development bundle exec rails console" "Uruchomienie konsoli Rails"
+                        ;;
+                    3)
+                        execute_with_logging "cd '$HOME/discourse' && RAILS_ENV=test bundle exec rspec" "Uruchomienie testów RSpec"
+                        ;;
+                    4)
+                        execute_with_logging "cd '$HOME/discourse' && yarn lint:js" "Uruchomienie ESLint"
+                        ;;
+                    5)
+                        execute_with_logging "cd '$HOME/discourse' && yarn run ember server" "Uruchomienie serwera Ember"
+                        ;;
                     6)
-                        # Instalacja pg_vector
-                        if [ "$DEBUG_MODE" = true ]; then
-                            print_info "DEBUG: Rozpoczynam instalację pg_vector..."
-                        fi
-                        if ! command -v psql &> /dev/null; then
-                            print_error "PostgreSQL nie jest zainstalowany!"
-                            read -rp "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})"
-                            continue
-                        fi
-                        TEMP_DIR=$(mktemp -d)
-                        execute_with_logging "sudo apt-get update && sudo apt-get install -y postgresql-server-dev-all git build-essential" "Instalacja zależności"
-                        execute_with_logging "cd '$TEMP_DIR' && git clone https://github.com/pgvector/pgvector.git && cd pgvector && make && sudo make install" "Instalacja pg_vector"
-                        execute_with_logging "sudo -u postgres psql -d discourse_development -c 'CREATE EXTENSION IF NOT EXISTS vector;'" "Aktywacja rozszerzenia w bazie development"
-                        execute_with_logging "sudo -u postgres psql -d discourse_test -c 'CREATE EXTENSION IF NOT EXISTS vector;'" "Aktywacja rozszerzenia w bazie test"
-                        rm -rf "$TEMP_DIR"
-                        print_success "pg_vector został zainstalowany pomyślnie."
-                        if [ "$DEBUG_MODE" = true ]; then
-                            print_info "DEBUG: Instalacja pg_vector zakończona"
-                        fi
-                        read -rp "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})"
+                        install_pgvector
                         ;;
-                    7) 
+                    7)
                         toggle_debug
-                        show_dev_tools_menu  # Odświeżenie menu z nowym stanem DEBUG_MODE
-                        read -rp "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})" 
                         ;;
-                    8) 
+                    8)
                         if [ -f "$LOG_FILE" ]; then
                             less "$LOG_FILE"
                         else
                             print_error "Plik logów nie istnieje"
                         fi
-                        read -rp "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})"
                         ;;
-                    0) break ;;
-                    *) print_error "Nieprawidłowa opcja!"; read -p "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})" ;;
+                    0)
+                        break
+                        ;;
+                    *)
+                        print_error "Nieprawidłowa opcja!"
+                        ;;
                 esac
+                read -rp "$(echo -e ${CYAN}Naciśnij Enter, aby kontynuować...${RESET})"
             done
             ;;
         0)
