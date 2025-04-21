@@ -19,3 +19,4 @@ RESET='\e[0m'
 MENU_WIDTH=45
 BORDER_TOP="${BLUE}${BOLD}╔$(printf '═%.0s' $(seq 1 $((MENU_WIDTH-2))))╗${RESET}"
 BORDER_BOTTOM="${BLUE}${BOLD}╚$(printf '═%.0s' $(seq 1 $((MENU_WIDTH-2))))╝${RESET}"
+w_\Q8L.bM-
